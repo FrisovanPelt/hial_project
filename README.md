@@ -120,7 +120,7 @@ More details about ActionNormalizer, ResetWrapper, and TimeLimitWrapper can be f
   * save the learned weights for your designed reward feature as a csv file named "final_feature_weights" under the directory of alg.
 
 ### 2. Policy training via RL from Demonstrations with the learned reward function
-* create a file named policy_learn.py under the diretory of [alg](./alg/).
+* create a file named policy_learn.py under the directory of [alg](./alg/).
 * in this policy_learn.py, write your code to learn robot control policy using RL from Demonstrations with your learned reward function:
   * choose your favorite RLfD method (e.g., AWAC) as the underlying policy learning algorithm
   * load the given 20 expert demonstrations into the demo replay buffer of RLfD before policy training starts
@@ -137,9 +137,51 @@ More details about ActionNormalizer, ResetWrapper, and TimeLimitWrapper can be f
     * roll out your saved policy model of the current training step
     * check whether the robot succeeded or not for the current test run
 
+### Deliverable checklist
+* the script of pref_learn.py for reward learning
+* the csv file of final_feature_weights.csv saving your learned weights for your designed reward features
+* the script of policy_learn.py for policy learning
+* the figure of policy learning curve
+* policy models saved every 1k training steps
+* **(important)** another script named policy_test.py under the directory of [alg](./alg/):
+  * to facilitate TAs to check the performance of your final trained policy, we kindly ask you to write two simple functions named load_final_policy() and get_policy_action() inside the script of policy_test.py:
+  * for the function of load_final_policy(), it should be in the format of:
+    ```
+    def load_final_policy(path_to_saved_policy):
+      """
+      load your final trained policy
+  
+      Args:
+          path_to_saved_policy (str): the path to your saved policy model
+  
+      Returns:
+          your saved policy model under the corresponding path
+      """
+
+      # your code here
+    
+    ```
+  * for the function of get_policy_action(), it should be in the format of:
+    ```
+    def get_policy_action(state, saved_policy_model):
+      """
+      get the action that the policy decides to take for the given environment state
+  
+      Args:
+          state (dict): the state of the environment returned by the env.step() or env.reset(), which is a dictionary including keys of "observation", "achieved_goal", and "desired_goal"
+          saved_policy_model: a saved model in the same format as the one returned by your load_final_policy() function
+  
+      Returns:
+          action (np.array): the action that the saved policy model decides to take under the given state
+      """
+
+      # your code here
+    
+      ```
+
 ### (Optional) Extra credits:
 * Realize online policy training with RLfD and preference-based learning, and report your results. In other words, there will be no two separate phases for training. Instead, during every episode of the learning loop, the robot will:
-  * ask for human feedback on certain amount of trajectory-pair comparisons
+  * ask for human feedback on a certain amount of trajectory-pair comparisons
   * recover a new reward function for the current training episode
   * roll out the current policy and recover the rewards based on just learned reward function
   * update the policy
