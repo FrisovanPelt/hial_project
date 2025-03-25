@@ -1,11 +1,11 @@
 import numpy as np
 import gym
 import panda_gym
+from gym.envs.registration import register
 import cv2
 import os
 import sys
-from aprel.learning import PreferenceBasedRewardLearning
-from aprel import Trajectory, Environment, Feature
+import aprel
 from time import sleep
 
 CURRENT_DIR = os.getcwd()
@@ -16,13 +16,11 @@ sys.path.append(PARENT_DIR + '/utils/')
 from task_envs import PnPNewRobotEnv
 from env_wrappers import ActionNormalizer, ResetWrapper, TimeLimitWrapper
 
-class RobotEnv(Environment):
-    def __init__(self, feature_func):
-        super().__init__()
-        self.feature_func = feature_func
-
-    def features(self, trajectory):
-        return self.feature_func(trajectory)
+register(
+    id='PnPNewRobotEnv-v0',  
+    entry_point='task_envs:PnPNewRobotEnv',  # Ensure correct module path
+    max_episode_steps=150,
+)
 
 def feature_function(trajectory):
      # Filtering out invalid rows (inf or NaN) 
@@ -165,7 +163,7 @@ def generate_expert_videos():
     env = TimeLimitWrapper(env=env, max_steps=150)
 
     trajectories = []
-    for i, demo in enumerate(demos[:10]):  # First 20 demos
+    for i, demo in enumerate(demos[:5]):  # First 20 demos
         init = demo['state_trajectory'][0][7:10]  # grab the initial position
         traj = record_video(env, demo['action_trajectory'], f'expert_demo_{i + 1}', init)
         aprel_traj = convert_to_aprel_trajectory(traj)
@@ -219,32 +217,39 @@ def convert_to_aprel_trajectory(traj_data):
 
 
 if __name__ == '__main__':
-    env = RobotEnv(feature_function)
 
-    # trajectories = generate_expert_videos() + generate_random_videos()
-    trajectories = generate_expert_videos()
+    # env_name = 'PnPNewRobotEnv'
+    # gym_env = gym.make(env_name)
 
-    reward_learning = PreferenceBasedRewardLearning(env)
+    # env = aprel.Environment(gym_env, feature_function)
 
-    # Generate queries for human feedback
-    queries, _ = reward_learning.generate_queries(
-        trajectories, 
-        query_type='preference', 
-        num_queries=10
-    )
+    # # trajectories = generate_expert_videos() + generate_random_videos()
+    # trajectories = generate_expert_videos()
 
-    # Collect human preferences interactively
-    responses = reward_learning.collect_responses(queries)
+    # features_dim = len(trajectories[0].features)
 
-    # Recover reward function based on human preferences
-    reward_learning.train(responses)
+    # query_optimizer = aprel.QueryOptimizerDiscreteTrajectorySet(trajectories)
 
-    # Save the learned reward feature weights
-    learned_weights = reward_learning.get_reward_weights()
-    np.savetxt('final_feature_weights.csv', learned_weights, delimiter=',', fmt='%f')
+    # true_user = aprel.HumanUser(delay=0.5)
 
-    print("Reward weights saved successfully.")
+    # params = {'weights': aprel.util_funs.get_random_normalized_vector(features_dim)}
+    # user_model = aprel.SoftmaxUser(params)
 
+    # belief = aprel.SamplingBasedBelief(user_model, [], params)
+    # print('Estimated user parameters: ' + str(belief.mean))
 
-    # generate_expert_videos()
+    # query = aprel.PreferenceQuery(trajectories[:2])
+
+    # for query_no in range(2):
+    #     queries, objective_values = query_optimizer.optimize('mutual_information', belief, query)
+    #     # queries and objective_values are lists even when we do not request a batch of queries.
+    #     print('Objective Value: ' + str(objective_values[0]))
+
+    #     responses = true_user.respond(queries[0])
+    #     belief.update(aprel.Preference(queries[0], responses[0]))
+    #     print('Estimated user parameters: ' + str(belief.mean))
+
+    # print("Reward weights saved successfully.")
+
+    generate_expert_videos()
     # generate_random_videos()
