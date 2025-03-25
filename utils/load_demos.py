@@ -10,7 +10,6 @@ CURRENT_DIR = os.getcwd()
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
 sys.path.append(PARENT_DIR + '/envs/')
 from task_envs import PnPNewRobotEnv
-
 from env_wrappers import ActionNormalizer, ResetWrapper, TimeLimitWrapper
 
 
