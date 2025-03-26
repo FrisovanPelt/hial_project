@@ -19,9 +19,10 @@ from env_wrappers import ActionNormalizer, ResetWrapper, TimeLimitWrapper
 
 register(
     id='PnPNewRobotEnv-v0',  
-    entry_point='task_envs:PnPNewRobotEnv',  # Ensure correct module path
+    entry_point='task_envs:PnPNewRobotEnv',  
     max_episode_steps=150,
 )
+
 
 def feature_function(traj):
     """Returns the features of the given trajectory.
@@ -31,25 +32,80 @@ def feature_function(traj):
 
     Returns:
         features: a numpy vector corresponding the features of the trajectory
+    
+    Observation: 
+    # 0-2: End-effector position
+    
+    # 3-5: End-effector velocity
+
+    # 6: Gripper width
+
+    # 7-9: Object (banana) position
+
+    # 10-12: Object orientation (probably quaternion or Euler)
+
+    # 13-15: Object linear velocity
+
+    # 16-18: Object angular velocity
+    
     """
+    
     states = np.array([pair[0] for pair in traj])
     
-    # Extract relevant state information (end-effector position)
-    ee_positions = states[:, :3]  # Assuming first 3 elements are ee_positions
+    #  Extract components from the state 
+    ee_pos = states[:, 0:3]     # End-effector position
+    ee_vel = states[:, 3:6]     # End-effector velocity
+    obj_pos = states[:, 7:10]   # Banana position
+    goal_pos = states[:, -3:]   # Goal position (assumed at end)
+
+    #  Feature 1: Mean end-effector speed 
+    # reflects how fast the robot was moving on average
+    #distinguish smooth vs jittery
+    ee_speed = np.linalg.norm(ee_vel, axis=1)
+    mean_ee_speed = np.mean(ee_speed)
+
+    #  Feature 2: Max banana height (Z) 
+    # determines if banana was picked up (thrown in air accidentally?)
+    max_obj_z = np.max(obj_pos[:, 2])
+
+    #  Feature 3: Lifted ratio (above 2.5 cm) 
+    # time banan lifeted: picked and carreid or dragged/ dropped / thrown
+    lifted_ratio = np.mean(obj_pos[:, 2] > 0.025)
+
+    # -- Feature 4: Final banana-to-goal distance 
+    # how clsoe banana ended up
+    final_obj_pos = obj_pos[-1]
+    final_goal_pos = goal_pos[-1]
+    final_dist_obj_goal = np.linalg.norm(final_obj_pos - final_goal_pos)
+
+    #  Feature 5: Minimum banana-to-goal distance over time 
+    # closets banana got
+    dists_obj_goal = np.linalg.norm(obj_pos - goal_pos, axis=1)
+    min_dist_obj_goal = np.min(dists_obj_goal)
+
+    #  Feature 6: Average banana-to-gripper distance 
+    # how close gripper was to banana overall
+    avg_dist_obj_gripper = np.mean(np.linalg.norm(obj_pos - ee_pos, axis=1))
+
+    # Combininign into final np arry feature for output
+    features = np.array([
+        mean_ee_speed,
+        max_obj_z,
+        lifted_ratio,
+        final_dist_obj_goal,
+        min_dist_obj_goal,
+        avg_dist_obj_gripper
+    ])
+
+    #  Normalising 
+    # done to provide equal influencing to account for differences in scale 
     
-    # Calculate features
-    min_x, min_y, min_z = ee_positions.min(axis=0)
-    max_x, max_y, max_z = ee_positions.max(axis=0)
-    mean_velocity = np.abs(states[:, 3:6]).mean()  # Assuming 4-6 are ee_velocities
-    
-    # Normalize features (using pre-computed mean and std)
-    mean_vec = np.array([min_x, min_y, min_z, max_x, max_y, max_z, mean_velocity]).mean(axis=0)
-    std_vec = np.array([min_x, min_y, min_z, max_x, max_y, max_z, mean_velocity]).std(axis=0)
-    
-    # Handle the case where std_vec is zero to avoid division by zero
-    std_vec = np.where(std_vec == 0, 1, std_vec)  # Replace zeros with 1
-    
-    return (np.array([min_x, min_y, min_z, max_x, max_y, max_z, mean_velocity]) - mean_vec) / std_vec
+    mean_vec = np.array([0.27620503, 0.11339422, 0.25267853, 0.23587602, 0.17840652, 0.29698574])
+    std_vec =  np.array([0.28688117, 0.06822429, 0.18223242, 0.08579391, 0.06190555, 0.12427733])
+
+    normed_features = (features - mean_vec) / std_vec
+
+    return normed_features
 
 def prepare_demo_pool(demo_path):
     """Load the expert demonstration data into a structured format."""
@@ -141,6 +197,7 @@ def generate_expert_videos():
     demo_path = PARENT_DIR + '/demo_data/PickAndPlace/'
     demos = prepare_demo_pool(demo_path)
 
+
     env = PnPNewRobotEnv(render=True)
     env = ActionNormalizer(env)
     env = ResetWrapper(env=env)
@@ -211,6 +268,7 @@ if __name__ == '__main__':
     env = aprel.Environment(gym_env, feature_function)
 
     trajectories = generate_expert_videos() + generate_random_videos()
+
     aprel_trajectories = aprel.TrajectorySet(convert_to_aprel_trajectory(trajectories, env))
 
     features_dim = len(aprel_trajectories[0].features)
