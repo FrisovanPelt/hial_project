@@ -1,15 +1,13 @@
 import numpy as np
-import gym
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import random
-import csv
+from gym.envs.registration import register
+from gym.spaces import Box
 import os
 import sys
-from collections import deque
-from pref_learn import prepare_demo_pool
-from pref_learn import feature_function
+import torch
+from awac import AWAC
+from core import MLPActorCritic
+from pref_learn import feature_function, prepare_demo_pool
+import aprel
 
 CURRENT_DIR = os.getcwd()
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
@@ -19,145 +17,68 @@ sys.path.append(PARENT_DIR + '/utils/')
 from task_envs import PnPNewRobotEnv
 from env_wrappers import ActionNormalizer, ResetWrapper, TimeLimitWrapper, reconstruct_state
 
-# Load learned feature weights
-WEIGHT_FILE = "final_feature_weights.csv"
-def load_weights():
-    with open(WEIGHT_FILE, 'r') as f:
-        reader = csv.reader(f)
-        next(reader)  # Skip header
-        return np.array([float(row[0]) for row in reader])
+register(
+    id='PnPNewRobotEnv-v0',  
+    entry_point='task_envs:PnPNewRobotEnv',  # Ensure correct module path
+    max_episode_steps=150,
+)
 
-# Define Deep Q-Network
-class DQNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(DQNetwork, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, action_dim)
+# Load learned reward weights
+weights_path = 'final_feature_weights.csv'
+weights = np.loadtxt(weights_path, delimiter=',', skiprows=1).flatten()
+
+# Learned reward function
+def learned_reward_fn(traj):
+    """
+    Computes the reward for an entire trajectory of (state, action) pairs.
+    """
+    feat = feature_function(traj)
+    return np.dot(weights, feat)
+
+# Setup env
+def make_env():
+    env = PnPNewRobotEnv(render=False)
+    env = ActionNormalizer(env)
+    env = ResetWrapper(env)
+    env = TimeLimitWrapper(env, max_steps=150)
     
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+    # Manually override observation_space with the flattened version
+    obs_dim = 19 + 3  # len(observation) + len(achieved_goal)
+    env.observation_space = Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
 
-# Define DQfD Agent
-class DQfDAgent:
-    def __init__(self, state_dim, action_dim, replay_buffer, learning_rate=1e-4, gamma=0.99):
-        self.q_network = DQNetwork(state_dim, action_dim)
-        self.target_network = DQNetwork(state_dim, action_dim)
-        self.target_network.load_state_dict(self.q_network.state_dict())
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
-        self.replay_buffer = replay_buffer
-        self.gamma = gamma
-        self.epsilon = 1.0  # Initial exploration rate
-        self.epsilon_decay = 0.9995  # Decay rate
-        self.epsilon_min = 0.1  # Minimum exploration
+    return env
 
-    def select_action(self, state):
-        if random.random() < self.epsilon:
-            return np.random.uniform(-1, 1, size=(4,))  # Continuous action space
-        state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        with torch.no_grad():
-            q_values = self.q_network(state_tensor)
-        return q_values.cpu().numpy().flatten()
-    
-    def update_policy(self, batch_size=64):
-        if len(self.replay_buffer) < batch_size:
-            return
-        
-        batch = random.sample(self.replay_buffer, batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
-        
-        states = torch.FloatTensor(states)
-        actions = torch.FloatTensor(actions)
-        rewards = torch.FloatTensor(rewards).unsqueeze(1)
-        next_states = torch.FloatTensor(next_states)
-        dones = torch.FloatTensor(dones).unsqueeze(1)
-        
-        q_values = self.q_network(states)
-        target_q_values = self.target_network(next_states)
-        max_next_q = target_q_values.max(dim=1, keepdim=True)[0]
-        expected_q = rewards + self.gamma * max_next_q * (1 - dones)
-        
-        loss = torch.nn.functional.mse_loss(q_values, expected_q.detach())
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-    
-    def update_target_network(self):
-        self.target_network.load_state_dict(self.q_network.state_dict())
-
-# Prepare environment
-env = PnPNewRobotEnv(render=True)
-env = ActionNormalizer(env)
-env = ResetWrapper(env=env)
-env = TimeLimitWrapper(env=env, max_steps=150)
-
-# Load expert demonstrations
+# Load expert demos
 demo_path = PARENT_DIR + '/demo_data/PickAndPlace/'
-demos = prepare_demo_pool(demo_path)
+demos_raw = prepare_demo_pool(demo_path)
 
-# Initialize Replay Buffer with expert demonstrations
-replay_buffer = deque(maxlen=100000)
-for demo in demos:
-    for i in range(len(demo['state_trajectory']) - 1):
-        replay_buffer.append((
-            reconstruct_state(demo['state_trajectory']),
-            demo['action_trajectory'][i],
-            demo['reward_trajectory'][i],
-            reconstruct_state(demo['next_state_trajectory']),
-            demo['done_trajectory'][i]
-        ))
+# # Convert states to flattened format
+# for demo in demos_raw:
+#     state = demo['state_trajectory']
+#     next_state = demo['next_state_trajectory']
 
-# Initialize agent
-state_dim = len(reconstruct_state(demos[0]['state_trajectory'][0]))
-action_dim = len(demos[0]['action_trajectory'][0])
-agent = DQfDAgent(state_dim, action_dim, replay_buffer)
+#     print(f"state: {len(state)}")
+#     print(f"action: {type(state)}")
+#     state = reconstruct_state(state)
+#     next_state = reconstruct_state(next_state)
 
-# Train policy
-num_steps = 500000
-save_interval = 1000
-batch_size = 64
+# Create and train agent
+agent = AWAC(
+    env_fn=make_env,
+    actor_critic=MLPActorCritic,
+    ac_kwargs=dict(hidden_sizes=[256, 256]),
+    steps_per_epoch=1000,
+    epochs=500,
+    replay_size=int(1e6),
+    batch_size=256,
+    update_after=1000,
+    update_every=50,
+    num_test_episodes=10,
+    max_ep_len=150,
+)
 
-success_rates = []
-for step in range(num_steps):
-    state = reconstruct_state(env.reset())
-    done = False
-    while not done:
-        action = agent.select_action(state)
-        next_state, reward, done, info = env.step(action)
-        next_state = reconstruct_state(next_state)
-        reward = np.dot(load_weights(), feature_function([(state, action)]))  # Use learned reward
-        replay_buffer.append((state, action, reward, next_state, done))
-        agent.update_policy(batch_size)
-        state = next_state
-    
-    if step % save_interval == 0:
-        torch.save(agent.q_network.state_dict(), f"policy_model_{step}.pth")
-        
-        # Evaluate success rate
-        successes = []
-        for _ in range(10):
-            test_state = reconstruct_state(env.reset())
-            test_done = False
-            while not test_done:
-                test_action = agent.select_action(test_state)
-                test_state, _, test_done, test_info = env.step(test_action)
-                test_state = reconstruct_state(test_state)
-            successes.append(test_info['is_success'])
-        success_rate = np.mean(successes)
-        success_rates.append((step, success_rate))
-        print(f"Step {step}: Success Rate: {success_rate}")
+print("Populating replay buffer with expert demonstrations...")
+agent.populate_replay_buffer(demos_raw)
 
-# Save learning curve
-import matplotlib.pyplot as plt
-steps, rates = zip(*success_rates)
-plt.plot(steps, rates)
-plt.xlabel("Training Steps")
-plt.ylabel("Success Rate")
-plt.title("Policy Learning Curve")
-plt.savefig("learning_curve.png")
-plt.show()
+print("Starting AWAC training with learned reward function...")
+agent.run(learned_reward_fn)
