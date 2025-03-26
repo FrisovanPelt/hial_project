@@ -147,9 +147,9 @@ def generate_expert_videos():
     env = TimeLimitWrapper(env=env, max_steps=150)
 
     trajectories = []
-    for i, demo in enumerate(demos[:5]):  # First 20 demos
+    for i, demo in enumerate(demos[:20]):  # First 20 demos
         init = demo['state_trajectory'][0][7:10]  # grab the initial position
-        traj = record_video(env, demo['action_trajectory'], f'expert_demo_{i + 1}', init)
+        traj = record_video(env, demo['action_trajectory'], f'demo_{i + 1}', init)
         trajectories.append(traj)
 
     return trajectories
@@ -164,7 +164,7 @@ def generate_random_videos():
     trajectories = []
     for i in range(10):
         action_sequence = [env.action_space.sample() for _ in range(150)]
-        traj = record_video(env, action_sequence, f'random_demo_{i + 1}')
+        traj = record_video(env, action_sequence, f'demo_{i + 21}')
         trajectories.append(traj)
     
     return trajectories
@@ -189,9 +189,13 @@ def convert_to_aprel_trajectory(traj_data_list, env):
         
         if len(states) != len(actions):
             raise ValueError(f"Mismatch in length of states ({len(states)}) and actions ({len(actions)}) in trajectory {i}.")
+        
+        # Construct video file path
+        video_filename = f"demo_{i + 1}.mp4"  # Assuming expert demos are named as such
+        video_path = os.path.join("videos", video_filename)
 
         # Create APReL Trajectory object
-        trajectory = aprel.Trajectory(env, list(zip(states, actions)))
+        trajectory = aprel.Trajectory(env, list(zip(states, actions)), video_path)
         
         aprel_trajectories.append(trajectory)
 
@@ -206,8 +210,7 @@ if __name__ == '__main__':
 
     env = aprel.Environment(gym_env, feature_function)
 
-    # trajectories = generate_expert_videos() + generate_random_videos()
-    trajectories = generate_expert_videos()
+    trajectories = generate_expert_videos() + generate_random_videos()
     aprel_trajectories = aprel.TrajectorySet(convert_to_aprel_trajectory(trajectories, env))
 
     features_dim = len(aprel_trajectories[0].features)
@@ -224,7 +227,7 @@ if __name__ == '__main__':
 
     query = aprel.PreferenceQuery(aprel_trajectories[:2])
 
-    for query_no in range(4):
+    for query_no in range(10):
         queries, objective_values = query_optimizer.optimize('mutual_information', belief, query)
         # queries and objective_values are lists even when we do not request a batch of queries.
         print('Objective Value: ' + str(objective_values[0]))
@@ -235,7 +238,7 @@ if __name__ == '__main__':
 
     # Save the weights to a CSV file
     weights = belief.mean['weights']
-    filename = 'learned_weights.csv'
+    filename = 'final_feature_weights.csv'
 
     try:
         with open(filename, 'w', newline='') as csvfile:
@@ -246,5 +249,5 @@ if __name__ == '__main__':
         print(f"Weights saved to {filename}")
     except Exception as e:
         print(f"Error saving weights: {e}")
-        
+
     print("Reward weights saved successfully.")
