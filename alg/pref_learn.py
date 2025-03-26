@@ -1,6 +1,5 @@
 import numpy as np
 import gym
-import panda_gym
 from gym.envs.registration import register
 import cv2
 import csv 
@@ -201,7 +200,10 @@ def convert_to_aprel_trajectory(traj_data_list, env):
 
     return aprel_trajectories
 
-
+def reward_function(aprel_trajectory, weights):
+    features = aprel_trajectory.features  
+    reward = np.dot(weights, features)
+    return reward
 
 if __name__ == '__main__':
 
