@@ -3,7 +3,6 @@ import gym
 import panda_gym
 from gym.envs.registration import register
 import cv2
-import csv 
 import os
 import sys
 import aprel
@@ -233,18 +232,4 @@ if __name__ == '__main__':
         belief.update(aprel.Preference(queries[0], responses[0]))
         print('Estimated user parameters: ' + str(belief.mean))
 
-    # Save the weights to a CSV file
-    weights = belief.mean['weights']
-    filename = 'learned_weights.csv'
-
-    try:
-        with open(filename, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['Weight'])  # Write header
-            for weight in weights:
-                writer.writerow([weight])
-        print(f"Weights saved to {filename}")
-    except Exception as e:
-        print(f"Error saving weights: {e}")
-        
     print("Reward weights saved successfully.")
