@@ -1,3 +1,10 @@
+# CITATION:
+# @software{Sikchi_pytorch-AWAC,
+# author = {Sikchi, Harshit and Wilcox, Albert},
+# doi = {10.5281/zenodo.5121023},
+# title = {{pytorch-AWAC}},
+# url = {https://github.com/hari-sikchi/AWAC}
+# }
 from copy import deepcopy
 import itertools
 import numpy as np
@@ -59,7 +66,7 @@ class ReplayBuffer:
 
 class AWAC:
 
-    def __init__(self, env_fn, actor_critic=core.MLPActorCritic,
+    def __init__(self, env_fn, test_env_fn, actor_critic=core.MLPActorCritic,
                  ac_kwargs=dict(),
                  seed=0,
                  steps_per_epoch=100,
@@ -178,7 +185,8 @@ class AWAC:
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-        self.env, self.test_env = env_fn(), env_fn()
+        self.env = env_fn()
+        self.test_env = test_env_fn()
         self.obs_dim = self.env.observation_space.shape
         self.act_dim = self.env.action_space.shape[0]
 
@@ -358,26 +366,19 @@ class AWAC:
                 ep_ret += r
                 ep_len += 1
 
-    def run(self, learned_reward_fn, max_env_steps=500_000, save_path="saved_policies"):
+    def run(self, learned_reward_fn, max_env_steps=50_000, save_path="saved_policies"):
         total_steps = 0
-        success_rates = []
         step_checkpoints = []
+        success_rates = []
 
         os.makedirs(save_path, exist_ok=True)
-
-        print("🚀 Populating replay buffer with expert demonstrations...")
-        # NOTE: assumes `self.populate_replay_buffer()` was already called externally
-
-        obs = self.env.reset()
-        done = False
+        print("Populating replay buffer with expert demonstrations...")
 
         while total_steps < max_env_steps:
-
             obs = self.env.reset()
             done = False
             episode = []
 
-            # --- Rollout one episode with current policy ---
             while not done and len(episode) < self.max_ep_len:
                 obs_flat = reconstruct_state(obs)
                 act = self.get_action(obs_flat, deterministic=False)
@@ -387,44 +388,37 @@ class AWAC:
                 obs = next_obs
                 total_steps += 1
 
-                if total_steps >= max_env_steps:
-                    break
+                if total_steps % 1000 == 0:
+                    model_path = os.path.join(save_path, f"model_{total_steps}.pt")
+                    torch.save(self.ac.state_dict(), model_path)
+                    print(f"Saved model to {model_path}")
 
-            # --- Compute reward for full trajectory ---
-            trajectory = [(reconstruct_state(s), a) for (s, a, _, _) in episode]
-            total_reward = learned_reward_fn(trajectory)
+            traj = [(reconstruct_state(s), a) for (s, a, _, _) in episode]
+            total_reward = learned_reward_fn(traj)
             avg_reward = total_reward / len(episode)
+            print(f"Reward: {total_reward}")
 
-            # --- Store in replay buffer with averaged reward ---
             for (s, a, s2, d) in episode:
                 s_flat = reconstruct_state(s)
                 s2_flat = reconstruct_state(s2)
                 self.replay_buffer.store(s_flat, a, avg_reward, s2_flat, d)
 
-            # --- Update policy ---
             for _ in range(self.update_every):
                 batch = self.replay_buffer.sample_batch(self.batch_size)
                 self.update(data=batch, update_timestep=total_steps)
 
-            # --- Every 1000 steps: save + evaluate ---
-            if total_steps % 1000 == 0:
-                model_path = os.path.join(save_path, f"model_{total_steps}.pt")
-                torch.save(self.ac.state_dict(), model_path)
-                print(f"💾 Saved model to {model_path}")
+            success_rate = self.evaluate_policy()
+            print(f"Evaluation after {total_steps} steps: Success Rate = {success_rate:.2f}")
+            step_checkpoints.append(total_steps)
+            success_rates.append(success_rate)
 
-                success_rate = self.evaluate_policy()
-                print(f"✅ Step {total_steps}: Success Rate = {success_rate:.2f}")
-                step_checkpoints.append(total_steps)
-                success_rates.append(success_rate)
+        print("Training complete.")
 
-        print("🎯 Training complete.")
-
-        # --- Plot learning curve ---
         plt.figure(figsize=(8, 5))
         plt.plot(step_checkpoints, success_rates, marker='o')
-        plt.xlabel('Environment Steps')
-        plt.ylabel('Average Success Rate')
-        plt.title('Policy Learning Curve')
+        plt.xlabel("Environment Steps")
+        plt.ylabel("Average Success Rate")
+        plt.title("Policy Learning Curve")
         plt.grid(True)
-        plt.savefig(os.path.join(save_path, 'learning_curve.png'))
+        plt.savefig(os.path.join(save_path, "learning_curve.png"))
         plt.show()

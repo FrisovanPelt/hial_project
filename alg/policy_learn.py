@@ -19,15 +19,13 @@ from env_wrappers import ActionNormalizer, ResetWrapper, TimeLimitWrapper, recon
 
 register(
     id='PnPNewRobotEnv-v0',  
-    entry_point='task_envs:PnPNewRobotEnv',  # Ensure correct module path
+    entry_point='task_envs:PnPNewRobotEnv',
     max_episode_steps=150,
 )
 
-# Load learned reward weights
 weights_path = 'final_feature_weights.csv'
 weights = np.loadtxt(weights_path, delimiter=',', skiprows=1).flatten()
 
-# Learned reward function
 def learned_reward_fn(traj):
     """
     Computes the reward for an entire trajectory of (state, action) pairs.
@@ -35,36 +33,23 @@ def learned_reward_fn(traj):
     feat = feature_function(traj)
     return np.dot(weights, feat)
 
-# Setup env
-def make_env():
-    env = PnPNewRobotEnv(render=False)
+def make_env(render=False):
+    env = PnPNewRobotEnv(render=render)
     env = ActionNormalizer(env)
     env = ResetWrapper(env)
     env = TimeLimitWrapper(env, max_steps=150)
     
-    # Manually override observation_space with the flattened version
-    obs_dim = 19 + 3  # len(observation) + len(achieved_goal)
+    obs_dim = 19 + 3
     env.observation_space = Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
 
     return env
 
-# Load expert demos
 demo_path = PARENT_DIR + '/demo_data/PickAndPlace/'
 demos_raw = prepare_demo_pool(demo_path)
 
-# # Convert states to flattened format
-# for demo in demos_raw:
-#     state = demo['state_trajectory']
-#     next_state = demo['next_state_trajectory']
-
-#     print(f"state: {len(state)}")
-#     print(f"action: {type(state)}")
-#     state = reconstruct_state(state)
-#     next_state = reconstruct_state(next_state)
-
-# Create and train agent
 agent = AWAC(
-    env_fn=make_env,
+    env_fn=lambda: make_env(render=False),      
+    test_env_fn=lambda: make_env(render=False), 
     actor_critic=MLPActorCritic,
     ac_kwargs=dict(hidden_sizes=[256, 256]),
     steps_per_epoch=1000,

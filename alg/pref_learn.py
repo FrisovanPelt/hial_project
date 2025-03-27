@@ -18,37 +18,53 @@ from env_wrappers import ActionNormalizer, ResetWrapper, TimeLimitWrapper
 
 register(
     id='PnPNewRobotEnv-v0',  
-    entry_point='task_envs:PnPNewRobotEnv',  # Ensure correct module path
+    entry_point='task_envs:PnPNewRobotEnv', 
     max_episode_steps=150,
 )
 
 def feature_function(traj):
-    """Returns the features of the given trajectory.
-
-    Args:
-        traj: List of state-action tuples, e.g. [(state0, action0), (state1, action1), ...]
-
-    Returns:
-        features: a numpy vector corresponding the features of the trajectory
-    """
     states = np.array([pair[0] for pair in traj])
+    actions = np.array([pair[1] for pair in traj])
+
+    ee_pos = states[:, :3]              
+    obj_pos = states[:, 7:10]           
+    obj_z = obj_pos[:, 2]              
+    goal_pos = np.array([0.0, -0.2, 0.02])
+    dist_to_obj = np.linalg.norm(ee_pos - obj_pos, axis=1)
+
+    # 1. Distance improvement to object
+    initial_ee_dist = dist_to_obj[0]
+    final_ee_dist = dist_to_obj[-1]
+    ee_improvement = initial_ee_dist - final_ee_dist
     
-    # Extract relevant state information (end-effector position)
-    ee_positions = states[:, :3]  # Assuming first 3 elements are ee_positions
-    
-    # Calculate features
-    min_x, min_y, min_z = ee_positions.min(axis=0)
-    max_x, max_y, max_z = ee_positions.max(axis=0)
-    mean_velocity = np.abs(states[:, 3:6]).mean()  # Assuming 4-6 are ee_velocities
-    
-    # Normalize features (using pre-computed mean and std)
-    mean_vec = np.array([min_x, min_y, min_z, max_x, max_y, max_z, mean_velocity]).mean(axis=0)
-    std_vec = np.array([min_x, min_y, min_z, max_x, max_y, max_z, mean_velocity]).std(axis=0)
-    
-    # Handle the case where std_vec is zero to avoid division by zero
-    std_vec = np.where(std_vec == 0, 1, std_vec)  # Replace zeros with 1
-    
-    return (np.array([min_x, min_y, min_z, max_x, max_y, max_z, mean_velocity]) - mean_vec) / std_vec
+    # 2. Check if the banana was picked up (lifted above threshold)
+    picked_up = np.max(obj_z) > 0.05
+    if picked_up:
+        final_obj_pos = obj_pos[-1]
+        final_dist_to_goal = np.linalg.norm(final_obj_pos - goal_pos)
+        final_goal_score = -final_dist_to_goal
+    else:
+        final_goal_score = 0.0
+
+    # 3. Grip activity near banana
+    grip_values = states[:, 6]  
+    grip_deltas = np.abs(np.diff(grip_values))
+    dist_to_obj_mid = dist_to_obj[:-1]
+
+    proximity_weights = np.exp(-10 * dist_to_obj_mid)
+    grip_score = np.sum(grip_deltas * proximity_weights)
+
+    # Bonus if banana was picked up
+    if picked_up:
+        grip_score *= 1.5
+
+    features = np.array([
+        ee_improvement, 
+        final_goal_score,
+        grip_score,      
+    ])
+
+    return features
 
 def prepare_demo_pool(demo_path):
     """Load the expert demonstration data into a structured format."""
@@ -110,7 +126,6 @@ def record_video(env, action_sequence, filename, init=None):
         action = action_sequence[step]
         next_obs, reward, done, info = env.step(action)
 
-        # Save trajectory data
         trajectory['state_trajectory'].append(obs)
         trajectory['action_trajectory'].append(action)
         trajectory['reward_trajectory'].append(reward)
@@ -127,9 +142,8 @@ def record_video(env, action_sequence, filename, init=None):
         step += 1
 
     out.release()
-    print(f"✅ Video saved: {video_path}")
-    
-    # Convert lists to numpy arrays for consistency
+    print(f"Video saved: {video_path}")
+
     for key in trajectory:
         trajectory[key] = np.array(trajectory[key])
     
@@ -140,14 +154,14 @@ def generate_expert_videos():
     demo_path = PARENT_DIR + '/demo_data/PickAndPlace/'
     demos = prepare_demo_pool(demo_path)
 
-    env = PnPNewRobotEnv(render=True)
+    env = PnPNewRobotEnv(render=False)
     env = ActionNormalizer(env)
     env = ResetWrapper(env=env)
     env = TimeLimitWrapper(env=env, max_steps=150)
 
     trajectories = []
-    for i, demo in enumerate(demos[:20]):  # First 20 demos
-        init = demo['state_trajectory'][0][7:10]  # grab the initial position
+    for i, demo in enumerate(demos[:20]): 
+        init = demo['state_trajectory'][0][7:10] 
         traj = record_video(env, demo['action_trajectory'], f'demo_{i + 1}', init)
         trajectories.append(traj)
 
@@ -155,7 +169,7 @@ def generate_expert_videos():
 
 def generate_random_videos():
     """Generates 10 videos of random agent behavior."""
-    env = PnPNewRobotEnv(render=True)
+    env = PnPNewRobotEnv(render=False)
     env = ActionNormalizer(env)
     env = ResetWrapper(env=env)
     env = TimeLimitWrapper(env=env, max_steps=150)
@@ -189,11 +203,9 @@ def convert_to_aprel_trajectory(traj_data_list, env):
         if len(states) != len(actions):
             raise ValueError(f"Mismatch in length of states ({len(states)}) and actions ({len(actions)}) in trajectory {i}.")
         
-        # Construct video file path
-        video_filename = f"demo_{i + 1}.mp4"  # Assuming expert demos are named as such
+        video_filename = f"demo_{i + 1}.mp4"
         video_path = os.path.join("videos", video_filename)
 
-        # Create APReL Trajectory object
         trajectory = aprel.Trajectory(env, list(zip(states, actions)), video_path)
         
         aprel_trajectories.append(trajectory)
@@ -231,21 +243,19 @@ if __name__ == '__main__':
 
     for query_no in range(10):
         queries, objective_values = query_optimizer.optimize('mutual_information', belief, query)
-        # queries and objective_values are lists even when we do not request a batch of queries.
         print('Objective Value: ' + str(objective_values[0]))
 
         responses = true_user.respond(queries[0])
         belief.update(aprel.Preference(queries[0], responses[0]))
         print('Estimated user parameters: ' + str(belief.mean))
 
-    # Save the weights to a CSV file
     weights = belief.mean['weights']
     filename = 'final_feature_weights.csv'
 
     try:
         with open(filename, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['Weight'])  # Write header
+            writer.writerow(['Weight'])
             for weight in weights:
                 writer.writerow([weight])
         print(f"Weights saved to {filename}")
