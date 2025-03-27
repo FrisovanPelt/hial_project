@@ -66,6 +66,7 @@ def feature_function(traj):
 
     return features
 
+# Largely based off of load_demos
 def prepare_demo_pool(demo_path):
     """Load the expert demonstration data into a structured format."""
     state_traj = np.genfromtxt(demo_path + 'state_traj.csv', delimiter=' ')
@@ -96,6 +97,7 @@ def prepare_demo_pool(demo_path):
 
     return demos
 
+# This funtion both records the videos and returns the trajectory object used in the video
 def record_video(env, action_sequence, filename, init=None):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     video_path = f'videos/{filename}.mp4'
@@ -149,6 +151,7 @@ def record_video(env, action_sequence, filename, init=None):
     
     return trajectory
 
+# Sets up the environment and calls to record expert videos, also returns trajectories
 def generate_expert_videos():
     """Generates 20 expert demonstration video clips."""
     demo_path = PARENT_DIR + '/demo_data/PickAndPlace/'
@@ -167,6 +170,7 @@ def generate_expert_videos():
 
     return trajectories
 
+# Sets up the environment and calls to record random videos, also returns trajectories
 def generate_random_videos():
     """Generates 10 videos of random agent behavior."""
     env = PnPNewRobotEnv(render=False)
@@ -182,6 +186,7 @@ def generate_random_videos():
     
     return trajectories
 
+# Function for turning the trajectory data into a proper Aprel Trajectory object
 def convert_to_aprel_trajectory(traj_data_list, env):
     """Converts a list of recorded trajectory data to a list of APReL Trajectory objects."""
 
@@ -217,6 +222,7 @@ def reward_function(aprel_trajectory, weights):
     reward = np.dot(weights, features)
     return reward
 
+# Implementation of Aprel
 if __name__ == '__main__':
 
     env_name = 'PnPNewRobotEnv'
@@ -241,6 +247,7 @@ if __name__ == '__main__':
 
     query = aprel.PreferenceQuery(aprel_trajectories[:2])
 
+# 10 comparisons as specified by the assignment
     for query_no in range(10):
         queries, objective_values = query_optimizer.optimize('mutual_information', belief, query)
         print('Objective Value: ' + str(objective_values[0]))
@@ -252,6 +259,7 @@ if __name__ == '__main__':
     weights = belief.mean['weights']
     filename = 'final_feature_weights.csv'
 
+# For saving the weights in a csv
     try:
         with open(filename, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)

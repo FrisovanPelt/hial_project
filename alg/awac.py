@@ -235,6 +235,7 @@ class AWAC:
         # Set up model saving
         print("Running Offline RL algorithm: {}".format(self.algo))
 
+# Changed to use the expert demos
     def populate_replay_buffer(self, demos):
         """
         Load expert demonstrations into the replay buffer.
@@ -306,6 +307,7 @@ class AWAC:
 
         return loss_pi, pi_info
     
+    # Added to track the amount of successful banana placements
     def evaluate_policy(self):
         """Evaluate current policy for 10 runs, return success rate."""
         success_count = 0
@@ -366,6 +368,7 @@ class AWAC:
                 ep_ret += r
                 ep_len += 1
 
+    # Our implementation of the run function, using 50k instead of 500k steps because of time constraints and not getting a successful policy
     def run(self, learned_reward_fn, max_env_steps=50_000, save_path="saved_policies"):
         total_steps = 0
         step_checkpoints = []
@@ -374,6 +377,7 @@ class AWAC:
         os.makedirs(save_path, exist_ok=True)
         print("Populating replay buffer with expert demonstrations...")
 
+    # Training loop
         while total_steps < max_env_steps:
             obs = self.env.reset()
             done = False
@@ -388,16 +392,19 @@ class AWAC:
                 obs = next_obs
                 total_steps += 1
 
+                # Save model every 1000 steps
                 if total_steps % 1000 == 0:
                     model_path = os.path.join(save_path, f"model_{total_steps}.pt")
                     torch.save(self.ac.state_dict(), model_path)
                     print(f"Saved model to {model_path}")
 
+            # Calculates the total reward 
             traj = [(reconstruct_state(s), a) for (s, a, _, _) in episode]
             total_reward = learned_reward_fn(traj)
             avg_reward = total_reward / len(episode)
             print(f"Reward: {total_reward}")
 
+            # Stores episode in replay buffer
             for (s, a, s2, d) in episode:
                 s_flat = reconstruct_state(s)
                 s2_flat = reconstruct_state(s2)
@@ -414,6 +421,7 @@ class AWAC:
 
         print("Training complete.")
 
+        # Shows the plot of the success rate over time, saved with the saved_policies
         plt.figure(figsize=(8, 5))
         plt.plot(step_checkpoints, success_rates, marker='o')
         plt.xlabel("Environment Steps")

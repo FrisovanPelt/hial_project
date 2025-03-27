@@ -26,6 +26,7 @@ register(
 weights_path = 'final_feature_weights.csv'
 weights = np.loadtxt(weights_path, delimiter=',', skiprows=1).flatten()
 
+# Here is the learned reward function that uses the weights we got from the Aprel implementation and will be used to train the policy in AWAC
 def learned_reward_fn(traj):
     """
     Computes the reward for an entire trajectory of (state, action) pairs.
@@ -33,6 +34,7 @@ def learned_reward_fn(traj):
     feat = feature_function(traj)
     return np.dot(weights, feat)
 
+# Ready the environment
 def make_env(render=False):
     env = PnPNewRobotEnv(render=render)
     env = ActionNormalizer(env)
@@ -47,6 +49,7 @@ def make_env(render=False):
 demo_path = PARENT_DIR + '/demo_data/PickAndPlace/'
 demos_raw = prepare_demo_pool(demo_path)
 
+# Create an AWAC agent
 agent = AWAC(
     env_fn=lambda: make_env(render=False),      
     test_env_fn=lambda: make_env(render=False), 
@@ -62,6 +65,7 @@ agent = AWAC(
     max_ep_len=150,
 )
 
+# Debug/useful process logs
 print("Populating replay buffer with expert demonstrations...")
 agent.populate_replay_buffer(demos_raw)
 
